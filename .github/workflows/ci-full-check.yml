@@ -25,12 +25,14 @@ jobs:
       cache-key-prefix: ${{github.run_number}}-
 
   caching-config:
-    uses: ./.github/workflows/integ-test-action-inputs-caching.yml
+    uses: ./.github/workflows/integ-test-caching-config.yml
     with:
       cache-key-prefix: ${{github.run_number}}-
 
   dependency-graph:
     uses: ./.github/workflows/integ-test-dependency-graph.yml
+    permissions:
+      contents: write
     with:
       cache-key-prefix: ${{github.run_number}}-
 
@@ -56,10 +58,10 @@ jobs:
     with:
       cache-key-prefix: ${{github.run_number}}-
 
-  # restore-configuration-cache:
-  #   uses: ./.github/workflows/integ-test-restore-configuration-cache.yml
-  #   with:
-  #     cache-key-prefix: ${{github.run_number}}-
+  restore-configuration-cache:
+    uses: ./.github/workflows/integ-test-restore-configuration-cache.yml
+    with:
+      cache-key-prefix: ${{github.run_number}}-
 
   restore-custom-gradle-home:
     uses: ./.github/workflows/integ-test-restore-custom-gradle-home.yml

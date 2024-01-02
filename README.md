@@ -4,7 +4,7 @@ This GitHub Action can be used to configure Gradle and optionally execute a Grad
 
 ## Why use the `gradle-build-action`?
 
-It is possible to directly invoke Gradle in your workflow, and the `actions/setup-java@v3` action provides a simple way to cache Gradle dependencies. 
+It is possible to directly invoke Gradle in your workflow, and the `actions/setup-java@v4` action provides a simple way to cache Gradle dependencies. 
 
 However, the `gradle-build-action` offers a number of advantages over this approach:
 
@@ -36,7 +36,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-java@v3
+    - uses: actions/setup-java@v4
       with:
         distribution: temurin
         java-version: 11
@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-java@v3
+    - uses: actions/setup-java@v4
       with:
         distribution: temurin
         java-version: 11
@@ -96,7 +96,6 @@ jobs:
     - run: gradle build --dry-run # just test build configuration
     - run: echo "The release-candidate version was ${{ steps.setup-gradle.outputs.gradle-version }}"
 ```
-
 
 ## Caching build state between Jobs
 
@@ -159,6 +158,31 @@ If you want override the default and have the `gradle-build-action` caches overw
 
 ```yaml
 cache-overwrite-existing: true
+```
+
+### Saving configuration-cache data
+
+When Gradle is executed with the [configuration-cache](https://docs.gradle.org/current/userguide/configuration_cache.html) enabled, the configuration-cache data is stored
+in the project directory, at `<project-dir>/.gradle/configuration-cache`. Due to the way the configuration-cache works, [this file may contain stored credentials and other
+secrets](https://docs.gradle.org/release-nightly/userguide/configuration_cache.html#config_cache:secrets), and this data needs to be encrypted in order to be safely stored in the GitHub Actions cache.
+
+In order to benefit from configuration caching in your GitHub Actions workflow, you must:
+- Execute your build with Gradle 8.6 or newer. This can be achieved directly, or via the Gradle Wrapper.
+- Enable the configuration cache for your build.
+- Generate a [valid Gradle encryption key](https://docs.gradle.org/8.6-rc-1/userguide/configuration_cache.html#config_cache:secrets:configuring_encryption_key) and save it as a [GitHub Actions secret](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions).
+- Provide the secret key via the `cache-encryption-key` action parameter.
+
+```yaml
+jobs:
+  gradle-with-configuration-cache:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: gradle/gradle-build-action@v3
+      with:
+        gradle-version: 8.6-rc-1
+        cache-encryption-key: ${{ secrets.GradleEncryptionKey }}
+    - run: gradle build --configuration-cache
 ```
 
 ### Incompatibility with other caching mechanisms
@@ -344,62 +368,57 @@ gradle-home-cache-cleanup: true
 
 ## Build reporting
 
-The `gradle-build-action` collects information about any Gradle executions that occur in a workflow, and reports these via
-a Job Summary, visible in the GitHub Actions UI. For each Gradle execution, details about the invocation are listed, together with
-a link to any Build Scan® published.
+The `gradle-build-action` collects information about any Gradle executions that occur in a workflow, including the root project,
+requested tasks, build outcome and any Build Scan link generated. Details of cache entries read and written are also collected.
+These details are compiled into a Job Summary, which is visible in the GitHub Actions UI.
 
-Generation of a Job Summary is enabled by default. If this is not desired, it can be disable as follows:
+Generation of a Job Summary is enabled by default for all Jobs using the `gradle-build-action`. This feature can be configured
+so that a Job Summary is never generated, or so that a Job Summary is only generated on build failure:
 ```yaml
-generate-job-summary: false
+add-job-summary: 'on-failure' # Valid values are 'always' (default), 'never', and 'on-failure'
 ```
 
-Note that the action collects information about Gradle invocations via an [Initialization Script](https://docs.gradle.org/current/userguide/init_scripts.html#sec:using_an_init_script)
-located at `USER_HOME/.gradle/init.d/build-result-capture.init.gradle`.
-If you are using init scripts for the [Gradle Enterprise Gradle Plugin](https://plugins.gradle.org/plugin/com.gradle.enterprise) like
-[`scans-init.gradle` or `gradle-enterprise-init.gradle`](https://docs.gradle.com/enterprise/gradle-plugin/#scans_gradle_com),
-you'll need to ensure these files are applied prior to `build-result-capture.init.gradle`.
-Since Gradle applies init scripts in alphabetical order, one way to ensure this is via file naming.
+### Adding Job Summary as a Pull Request comment
 
-### Build Scan® link as Step output
+It is sometimes more convenient to view the results of a GitHub Actions Job directly from the Pull Request that triggered
+the Job. For this purpose you can configure the action so that Job Summary data is added as a Pull Request comment.
 
-As well as reporting the [Build Scan](https://gradle.com/build-scans/) link in the Job Summary,
-the `gradle-build-action` action makes this link available as a Step output named `build-scan-url`.
-
-You can then use that link in subsequent actions of your workflow. For example:
 
 ```yaml
-# .github/workflows/gradle-build-pr.yml
-name: Run Gradle on PRs
-on: pull_request
+name: CI
+on:
+  pull_request:
+
+permissions:
+  pull-requests: write
+
 jobs:
-  gradle:
+  run-gradle-build:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout project sources
       uses: actions/checkout@v4
     - name: Setup Gradle
-      uses: gradle/gradle-build-action@v2
-    - name: Run build with Gradle wrapper
-      id: gradle
-      run: ./gradlew build --scan
-    - name: "Add Build Scan URL as PR comment"
-      uses: actions/github-script@v5
-      if: github.event_name == 'pull_request' && failure()
+      uses: gradle/gradle-build-action@v3
       with:
-        github-token: ${{secrets.GITHUB_TOKEN}}
-        script: |
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: '❌ ${{ github.workflow }} failed: ${{ steps.gradle.outputs.build-scan-url }}'
-          })
+        add-job-summary-as-pr-comment: on-failure # Valid values are 'never' (default), 'always', and 'on-failure'
+    - run: ./gradlew build --scan
 ```
 
-### Saving build outputs
+Note that in order to add a Pull Request comment, the workflow must be configured with the `pull-requests: write` permission.
 
-By default, a GitHub Actions workflow using `gradle-build-action` will record the log output and any Build Scan links for your build,
-but any output files generated by the build will not be saved.
+
+### Build Scan® link as Step output
+
+As well as reporting all [Build Scan](https://gradle.com/build-scans/) links in the Job Summary,
+the `gradle-build-action` action makes this link available an an output of any Step that executes Gradle.
+
+The output name is `build-scan-url`. You can then use the build scan link in subsequent actions of your workflow. 
+
+### Saving arbitrary build outputs
+
+By default, a GitHub Actions workflow using `gradle-build-action` will record the log output and any Build Scan 
+links for your build, but any output files generated by the build will not be saved.
 
 To save selected files from your build execution, you can use the core [Upload-Artifact](https://github.com/actions/upload-artifact) action.
 For example:
@@ -423,102 +442,13 @@ jobs:
         path: build/reports/
 ```
 
-## Use the action to invoke Gradle
+### Use of custom init-scripts in Gradle User Home
 
-If the `gradle-build-action` is configured with an `arguments` input, then Gradle will execute a Gradle build with the arguments provided. NOTE: We recommend using the `gradle-build-action` as a "Setup Gradle" step as described above, with Gradle being invoked via a regular `run` command.
+Note that the action collects information about Gradle invocations via an [Initialization Script](https://docs.gradle.org/current/userguide/init_scripts.html#sec:using_an_init_script)
+located at `USER_HOME/.gradle/init.d/gradle-build-action.build-result-capture.init.gradle`.
 
-If no `arguments` are provided, the action will not execute Gradle, but will still cache Gradle state and configure build-scan capture for all subsequent Gradle executions.
-
-```yaml
-name: Run Gradle on PRs
-on: pull_request
-jobs:
-  gradle:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-java@v3
-      with:
-        distribution: temurin
-        java-version: 11
-    
-    - name: Setup and execute Gradle 'test' task
-      uses: gradle/gradle-build-action@v2
-      with:
-        arguments: test
-```
-
-### Multiple Gradle executions in the same Job
-
-It is possible to configure multiple Gradle executions to run sequentially in the same job. 
-The initial Action step will perform the Gradle setup.
-
-```yaml
-- uses: gradle/gradle-build-action@v2
-  with:
-    arguments: assemble
-- uses: gradle/gradle-build-action@v2
-  with:
-    arguments: check
-```
-
-### Gradle command-line arguments
-
-The `arguments` input can be used to pass arbitrary arguments to the `gradle` command line.
-Arguments can be supplied in a single line, or as a multi-line input.
-
-Here are some valid examples:
-```yaml
-arguments: build
-arguments: check --scan
-arguments: some arbitrary tasks
-arguments: build -PgradleProperty=foo
-arguments: |
-    build
-    --scan
-    -PgradleProperty=foo
-    -DsystemProperty=bar
-```
-
-If you need to pass environment variables, use the GitHub Actions workflow syntax:
-
-```yaml
-- uses: gradle/gradle-build-action@v2
-  env:
-    CI: true
-  with:
-    arguments: build
-```
-
-### Gradle build located in a subdirectory
-
-By default, the action will execute Gradle in the root directory of your project. 
-Use the `build-root-directory` input to target a Gradle build in a subdirectory.
-
-```yaml
-- uses: gradle/gradle-build-action@v2
-  with:
-    arguments: build
-    build-root-directory: some/subdirectory
-```
-
-### Using a specific Gradle executable
-
-The action will first look for a Gradle wrapper script in the root directory of your project. 
-If not found, `gradle` will be executed from the PATH.
-Use the `gradle-executable` input to execute using a specific Gradle installation.
-
-```yaml
- - uses: gradle/gradle-build-action@v2
-   with:
-     arguments: build
-     gradle-executable: /path/to/installed/gradle
-```
-
-This mechanism can also be used to target a Gradle wrapper script that is located in a non-default location.
+If you are adding any custom init scripts to the `USER_HOME/.gradle/init.d` directory, it may be necessary to ensure these files are applied prior to `gradle-build-action.build-result-capture.init.gradle`.
+Since Gradle applies init scripts in alphabetical order, one way to ensure this is via file naming.
 
 ## Support for GitHub Enterprise Server (GHES)
 
@@ -869,7 +799,7 @@ name: Run build with Gradle Enterprise injection
 env:
   GRADLE_ENTERPRISE_INJECTION_ENABLED: true
   GRADLE_ENTERPRISE_URL: https://ge.gradle.org
-  GRADLE_ENTERPRISE_PLUGIN_VERSION: 3.15.1
+  GRADLE_ENTERPRISE_PLUGIN_VERSION: 3.16.1
   GRADLE_ENTERPRISE_ACCESS_KEY: ${{ secrets.GE_ACCESS_KEY }} # Required to publish scans to ge.gradle.org
 
 jobs:
@@ -883,7 +813,7 @@ jobs:
       run: ./gradlew build
 ```
 
-This configuration will automatically apply `v3.15.1` of the [Gradle Enterprise Gradle plugin](https://docs.gradle.com/enterprise/gradle-plugin/), and publish build scans to https://ge.gradle.org.
+This configuration will automatically apply `v3.16.1` of the [Gradle Enterprise Gradle plugin](https://docs.gradle.com/enterprise/gradle-plugin/), and publish build scans to https://ge.gradle.org.
 
 Note that the `ge.gradle.org` server requires authentication in order to publish scans. The provided `GRADLE_ENTERPRISE_ACCESS_KEY` isn't required by the Gradle Enterprise injection script, 
 but will be used by the GE plugin in order to authenticate with the server.

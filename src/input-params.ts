@@ -29,6 +29,10 @@ export function isCacheCleanupEnabled(): boolean {
     return getBooleanInput('gradle-home-cache-cleanup')
 }
 
+export function getCacheEncryptionKey(): string {
+    return core.getInput('cache-encryption-key')
+}
+
 export function getCacheIncludes(): string[] {
     return core.getMultilineInput('gradle-home-cache-includes')
 }
@@ -67,8 +71,25 @@ export function isJobSummaryEnabled(): boolean {
     return getBooleanInput('generate-job-summary', true)
 }
 
-export function isDependencyGraphEnabled(): boolean {
-    return getBooleanInput('generate-dependency-graph', true)
+export function getJobSummaryOption(): JobSummaryOption {
+    return parseJobSummaryOption('add-job-summary')
+}
+
+export function getPRCommentOption(): JobSummaryOption {
+    return parseJobSummaryOption('add-job-summary-as-pr-comment')
+}
+
+function parseJobSummaryOption(paramName: string): JobSummaryOption {
+    const val = core.getInput(paramName)
+    switch (val.toLowerCase().trim()) {
+        case 'never':
+            return JobSummaryOption.Never
+        case 'always':
+            return JobSummaryOption.Always
+        case 'on-failure':
+            return JobSummaryOption.OnFailure
+    }
+    throw TypeError(`The value '${val}' is not valid for ${paramName}. Valid values are: [never, always, on-failure].`)
 }
 
 export function getDependencyGraphOption(): DependencyGraphOption {
@@ -80,11 +101,13 @@ export function getDependencyGraphOption(): DependencyGraphOption {
             return DependencyGraphOption.Generate
         case 'generate-and-submit':
             return DependencyGraphOption.GenerateAndSubmit
+        case 'generate-and-upload':
+            return DependencyGraphOption.GenerateAndUpload
         case 'download-and-submit':
             return DependencyGraphOption.DownloadAndSubmit
     }
     throw TypeError(
-        `The value '${val} is not valid for 'dependency-graph. Valid values are: [disabled, generate-and-upload, generate-and-submit, download-and-submit]. The default value is 'disabled'.`
+        `The value '${val}' is not valid for 'dependency-graph'. Valid values are: [disabled, generate, generate-and-submit, generate-and-upload, download-and-submit]. The default value is 'disabled'.`
     )
 }
 
@@ -119,8 +142,15 @@ function getBooleanInput(paramName: string, paramDefault = false): boolean {
 }
 
 export enum DependencyGraphOption {
-    Disabled,
-    Generate,
-    GenerateAndSubmit,
-    DownloadAndSubmit
+    Disabled = 'disabled',
+    Generate = 'generate',
+    GenerateAndSubmit = 'generate-and-submit',
+    GenerateAndUpload = 'generate-and-upload',
+    DownloadAndSubmit = 'download-and-submit'
+}
+
+export enum JobSummaryOption {
+    Never = 'never',
+    Always = 'always',
+    OnFailure = 'on-failure'
 }
